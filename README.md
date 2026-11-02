@@ -2,7 +2,7 @@
 
 **A no-code data analysis and ML studio that runs entirely in your browser.** Drop in a CSV, Excel, JSON or Parquet file, then profile, clean, transform, visualise, test, model and build dashboards with clicks, and Datamorph writes the pandas code for everything you did.
 
-> Live demo: _add your Vercel link here_
+> Live demo: https://datamorph-ebon.vercel.app
 
 ## Why browser-first?
 
