@@ -27,6 +27,8 @@ export interface Warning {
   level: "info" | "warn" | "critical";
   column?: string;
   message: string;
+  /** One-click fix: a recipe step to add */
+  fix?: { label: string; type: string; params: Record<string, unknown> };
 }
 
 export interface QualityScore {
@@ -107,39 +109,35 @@ export async function profileDataset(ds: Dataset): Promise<Profile> {
     return p;
   });
 
-  // 2. Histograms + IQR outlier counts for numeric columns (one query each, cheap in DuckDB).
+  // 2. Histogram + IQR outlier count per numeric column: one cheap GROUP BY scan each
+  //    (the outlier count rides along as a per-bin sum). Measured faster than one wide
+  //    query with 20 filtered counts per column.
   await Promise.all(
     columns.map(async (p, i) => {
       if (p.column.kind !== "number" || p.min === undefined || p.max === undefined) return;
       const col = `CAST(${ident(p.column.name)} AS DOUBLE)`;
       const lo = p.min as number;
-      const hi = p.max as number;
-      const width = (hi - lo) / HIST_BINS || 1;
+      const width = ((p.max as number) - lo) / HIST_BINS || 1;
       const q1 = num(stats[`q1${i}`]);
       const q3 = num(stats[`q3${i}`]);
-      const [bins, out] = await Promise.all([
-        query<{ b: number; c: number }>(
-          `SELECT LEAST(CAST(FLOOR((${col} - ${lo}) / ${width}) AS INTEGER), ${HIST_BINS - 1}) AS b, COUNT(*) AS c
-           FROM ${T} WHERE ${col} IS NOT NULL GROUP BY b ORDER BY b`,
-        ),
-        q1 !== undefined && q3 !== undefined
-          ? query<{ c: number }>(
-              `SELECT COUNT(*) AS c FROM ${T}
-               WHERE ${col} < ${q1 - 1.5 * (q3 - q1)} OR ${col} > ${q3 + 1.5 * (q3 - q1)}`,
-            )
-          : Promise.resolve([{ c: 0 }]),
-      ]);
+      const isOut =
+        q1 !== undefined && q3 !== undefined ? `(${col} < ${q1 - 1.5 * (q3 - q1)} OR ${col} > ${q3 + 1.5 * (q3 - q1)})` : "false";
+      const bins = await query<{ b: number; c: number; o: number }>(
+        `SELECT LEAST(CAST(FLOOR((${col} - ${lo}) / ${width}) AS INTEGER), ${HIST_BINS - 1}) AS b,
+                count(*) AS c, count(*) FILTER (WHERE ${isOut}) AS o
+         FROM ${T} WHERE ${col} IS NOT NULL GROUP BY b`,
+      );
       const counts = new Array(HIST_BINS).fill(0);
       for (const { b, c } of bins) counts[b] = c;
       p.histogram = counts.map((count, b) => ({ from: lo + b * width, to: lo + (b + 1) * width, count }));
-      p.outliers = out[0].c;
+      p.outliers = bins.reduce((s, r) => s + r.o, 0);
     }),
   );
 
-  // 3. Top values for everything that isn't numeric.
+  // 3. Top values for categories, text and booleans (dates show their range instead).
   await Promise.all(
     columns.map(async (p) => {
-      if (p.column.kind === "number") return;
+      if (p.column.kind === "number" || p.column.kind === "date") return;
       const col = ident(p.column.name);
       p.topValues = (
         await query<{ v: string; c: number }>(
@@ -152,7 +150,8 @@ export async function profileDataset(ds: Dataset): Promise<Profile> {
 
   // 4. Duplicate rows.
   const [{ d }] = await query<{ d: number }>(
-    `SELECT ${n} - (SELECT COUNT(*) FROM (SELECT DISTINCT * FROM ${T})) AS d`,
+    // Compare one 64-bit hash per row instead of every column (collisions are negligible).
+    `SELECT ${n} - count(DISTINCT hash(${ds.columns.map((c) => ident(c.name)).join(", ")})) AS d FROM ${T}`,
   );
 
   const correlation = await correlationMatrix(ds);
@@ -196,22 +195,47 @@ export function buildWarnings(columns: ColumnProfile[], n: number, dupes: number
   const w: Warning[] = [];
   if (n === 0) return [{ level: "critical", message: "The dataset has no rows." }];
   if (dupes > 0)
-    w.push({ level: "warn", message: `${dupes.toLocaleString()} duplicate rows (${pct(dupes / n)} of the data).` });
+    w.push({
+      level: "warn",
+      message: `${dupes.toLocaleString()} duplicate rows (${pct(dupes / n)} of the data).`,
+      fix: { label: "Remove duplicates", type: "dropDuplicates", params: { columns: [] } },
+    });
 
   for (const p of columns) {
     const name = p.column.name;
     if (p.missingPct === 1) {
-      w.push({ level: "critical", column: name, message: `${name} is completely empty. Consider dropping it.` });
+      w.push({
+        level: "critical",
+        column: name,
+        message: `${name} is completely empty. Consider dropping it.`,
+        fix: { label: "Drop column", type: "dropColumns", params: { columns: [name] } },
+      });
       continue;
     }
-    if (p.missingPct >= 0.4)
-      w.push({ level: "critical", column: name, message: `${name} has ${pct(p.missingPct)} missing values.` });
-    else if (p.missingPct >= 0.05)
-      w.push({ level: "warn", column: name, message: `${name} has ${pct(p.missingPct)} missing values.` });
+    if (p.missingPct >= 0.05) {
+      const k = p.column.kind;
+      const fix =
+        k === "number"
+          ? { label: "Fill with median", type: "fillMissing", params: { column: name, method: "median", value: "" } }
+          : k === "category" || k === "boolean"
+            ? { label: "Fill with most frequent", type: "fillMissing", params: { column: name, method: "mode", value: "" } }
+            : { label: "Drop those rows", type: "dropMissing", params: { columns: [name] } };
+      w.push({
+        level: p.missingPct >= 0.4 ? "critical" : "warn",
+        column: name,
+        message: `${name} has ${pct(p.missingPct)} missing values.`,
+        fix: p.missingPct >= 0.6 ? { label: "Drop column", type: "dropColumns", params: { columns: [name] } } : fix,
+      });
+    }
 
     const nonNull = n - p.missing;
     if (nonNull > 1 && p.unique <= 1)
-      w.push({ level: "warn", column: name, message: `${name} has a single constant value, so it carries no information.` });
+      w.push({
+        level: "warn",
+        column: name,
+        message: `${name} has a single constant value, so it carries no information.`,
+        fix: { label: "Drop column", type: "dropColumns", params: { columns: [name] } },
+      });
 
     const looksLikeId =
       /(^|_)id$|^id|uuid|key$/i.test(name) || (p.column.kind !== "number" && p.unique >= nonNull * 0.98 && nonNull > 20);
@@ -230,6 +254,7 @@ export function buildWarnings(columns: ColumnProfile[], n: number, dupes: number
         level: "info",
         column: name,
         message: `${name} has ${p.outliers.toLocaleString()} outliers by the IQR rule.`,
+        fix: { label: "Cap outliers", type: "outliers", params: { column: name, method: "iqr", k: 1.5, action: "cap" } },
       });
 
     if (p.numericShare !== undefined && p.numericShare >= 0.5 && p.numericShare < 1)
@@ -237,6 +262,7 @@ export function buildWarnings(columns: ColumnProfile[], n: number, dupes: number
         level: "warn",
         column: name,
         message: `${name} is mostly numbers (${pct(p.numericShare)}) but stored as text, so it has mixed types.`,
+        fix: { label: "Convert to number", type: "changeType", params: { column: name, to: "number", format: "" } },
       });
 
     if (p.column.kind === "category" && p.topValues) {
@@ -247,6 +273,7 @@ export function buildWarnings(columns: ColumnProfile[], n: number, dupes: number
           level: "warn",
           column: name,
           message: `${name} has values that differ only by case or spaces (e.g. "${vals.join('", "')}").`,
+          fix: { label: "Trim + lowercase", type: "textClean", params: { column: name, op: "trimLower" } },
         });
     }
   }

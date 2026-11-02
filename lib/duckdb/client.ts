@@ -26,16 +26,15 @@ async function init() {
 
 export type Row = Record<string, unknown>;
 
+// One long-lived connection: opening a connection per query adds measurable overhead.
+// The worker runs queries on it one after another, so concurrent callers are safe.
+let connPromise: Promise<duckdb.AsyncDuckDBConnection> | null = null;
+const conn = () => (connPromise ??= getDB().then((db) => db.connect()));
+
 /** Run SQL and return plain JS objects (BigInt → Number). */
 export async function query<T extends Row = Row>(sql: string): Promise<T[]> {
-  const db = await getDB();
-  const conn = await db.connect();
-  try {
-    const result = await conn.query(sql);
-    return result.toArray().map((r) => normalize(r.toJSON()) as T);
-  } finally {
-    await conn.close();
-  }
+  const result = await (await conn()).query(sql);
+  return result.toArray().map((r) => normalize(r.toJSON()) as T);
 }
 
 function normalize(obj: Row): Row {
@@ -47,13 +46,7 @@ function normalize(obj: Row): Row {
 }
 
 export async function exec(sql: string): Promise<void> {
-  const db = await getDB();
-  const conn = await db.connect();
-  try {
-    await conn.query(sql);
-  } finally {
-    await conn.close();
-  }
+  await (await conn()).query(sql);
 }
 
 /** Quote an identifier: my col → "my col" */

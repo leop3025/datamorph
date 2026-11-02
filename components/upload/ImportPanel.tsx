@@ -123,7 +123,7 @@ export function ImportPanel({ compact = false }: { compact?: boolean }) {
             <button
               key={s.file}
               disabled={!!busy}
-              onClick={() => addUrl(`/samples/${s.file}`, s.file)}
+              onClick={() => addUrl(`/samples/${s.file}`, s.file, true)}
               className="rounded-lg border bg-surface p-3 text-left transition-colors hover:border-accent disabled:opacity-50"
             >
               <div className="text-sm font-medium">{s.title}</div>

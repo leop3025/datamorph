@@ -1,9 +1,9 @@
 "use client";
 
 import { exec, getDB, ident, lit, query } from "@/lib/duckdb/client";
-import type { ColumnInfo, ColumnKind } from "./types";
+import type { ColumnInfo, ColumnKind, FileFormat } from "./types";
 
-export type FileFormat = "csv" | "json" | "parquet" | "excel";
+export type { FileFormat };
 
 export function detectFormat(fileName: string): FileFormat | null {
   const ext = fileName.toLowerCase().split(".").pop() ?? "";
@@ -118,20 +118,4 @@ export function inferKind(duckType: string, distinct: number | undefined, rows: 
     return d <= Math.max(30, rows * 0.05) ? "category" : "text";
   }
   return "text";
-}
-
-/** Physically convert a column so DuckDB agrees with the user's chosen type. */
-export async function convertColumn(table: string, column: string, kind: ColumnKind) {
-  const target: Record<ColumnKind, string> = {
-    number: "DOUBLE",
-    date: "TIMESTAMP",
-    boolean: "BOOLEAN",
-    category: "VARCHAR",
-    text: "VARCHAR",
-  };
-  const c = ident(column);
-  await exec(
-    `CREATE OR REPLACE TABLE ${ident(table)} AS
-     SELECT * REPLACE (TRY_CAST(${c} AS ${target[kind]}) AS ${c}) FROM ${ident(table)}`,
-  );
 }

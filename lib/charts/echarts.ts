@@ -2,7 +2,7 @@
 
 // Tree-shaken ECharts: register only what the app uses to keep the bundle small.
 import * as echarts from "echarts/core";
-import { BarChart, BoxplotChart, HeatmapChart, LineChart, PieChart, ScatterChart } from "echarts/charts";
+import { BarChart, BoxplotChart, HeatmapChart, LineChart, PieChart, ScatterChart, TreemapChart } from "echarts/charts";
 import {
   DatasetComponent,
   GridComponent,
@@ -11,7 +11,7 @@ import {
   TooltipComponent,
   VisualMapComponent,
 } from "echarts/components";
-import { CanvasRenderer } from "echarts/renderers";
+import { CanvasRenderer, SVGRenderer } from "echarts/renderers";
 
 echarts.use([
   BarChart,
@@ -20,6 +20,7 @@ echarts.use([
   LineChart,
   PieChart,
   ScatterChart,
+  TreemapChart,
   DatasetComponent,
   GridComponent,
   LegendComponent,
@@ -27,6 +28,7 @@ echarts.use([
   TooltipComponent,
   VisualMapComponent,
   CanvasRenderer,
+  SVGRenderer,
 ]);
 
 export { echarts };

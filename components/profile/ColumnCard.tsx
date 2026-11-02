@@ -1,5 +1,6 @@
 import type { ColumnProfile } from "@/lib/profile/profile";
 import { KindBadge } from "@/components/data-table/KindBadge";
+import { InfoTip } from "@/components/InfoTip";
 
 const fmt = (v: number | string | undefined) => {
   if (v === undefined || v === null) return "–";
@@ -58,7 +59,10 @@ export function ColumnCard({ profile: p, rowCount }: { profile: ColumnProfile; r
 function Item({ label, value, className = "" }: { label: string; value: string; className?: string }) {
   return (
     <div className="flex justify-between gap-2">
-      <dt className="text-muted">{label}</dt>
+      <dt className="flex items-center gap-1 text-muted">
+        {label}
+        {label === "Outliers" && <InfoTip concept="iqr" />}
+      </dt>
       <dd className={`truncate font-mono tabular-nums ${className}`}>{value}</dd>
     </div>
   );

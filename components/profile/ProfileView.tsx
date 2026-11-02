@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Info, Loader2, OctagonAlert, Timer } from "lucide-react";
+import { AlertTriangle, Info, Loader2, OctagonAlert, Timer, Wand2 } from "lucide-react";
+import { useStudio } from "@/lib/store/studio";
+import { InfoTip } from "@/components/InfoTip";
 import type { Dataset } from "@/lib/data/types";
 import { profileDataset, type Profile, type Warning } from "@/lib/profile/profile";
 import { ColumnCard } from "./ColumnCard";
@@ -91,7 +93,9 @@ function QualityCard({ profile }: { profile: Profile }) {
   const label = score >= 90 ? "Good" : score >= 70 ? "Needs some cleaning" : "Needs cleaning";
   return (
     <div className="rounded-xl border bg-surface p-5">
-      <h3 className="font-semibold">Data quality score</h3>
+      <h3 className="flex items-center gap-1.5 font-semibold">
+        Data quality score <InfoTip concept="quality" />
+      </h3>
       <div className="mt-2 flex items-baseline gap-2">
         <span className={`text-5xl font-semibold tabular-nums ${tone}`}>{score}</span>
         <span className="text-muted">/ 100</span>
@@ -112,6 +116,7 @@ function QualityCard({ profile }: { profile: Profile }) {
 }
 
 function WarningRow({ w }: { w: Warning }) {
+  const addStep = useStudio((s) => s.addStep);
   const style = {
     critical: { cls: "bg-bad-soft text-bad", Icon: OctagonAlert },
     warn: { cls: "bg-warn-soft text-warn", Icon: AlertTriangle },
@@ -120,7 +125,16 @@ function WarningRow({ w }: { w: Warning }) {
   return (
     <li className={`flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${style.cls}`}>
       <style.Icon className="mt-0.5 h-4 w-4 shrink-0" />
-      <span className="text-text">{w.message}</span>
+      <span className="flex-1 text-text">{w.message}</span>
+      {w.fix && (
+        <button
+          onClick={() => addStep(w.fix!.type, w.fix!.params)}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface px-2 py-0.5 text-xs font-medium text-accent hover:bg-accent-soft"
+          title="Adds a step to the cleaning recipe"
+        >
+          <Wand2 className="h-3 w-3" /> {w.fix.label}
+        </button>
+      )}
     </li>
   );
 }

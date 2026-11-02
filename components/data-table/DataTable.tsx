@@ -14,11 +14,18 @@ const BLOCK = 200;
 
 type Cell = string | null;
 
+/** DuckDB prints doubles in full (347545.4000000006); trim float noise for display, keep the raw value in the tooltip. */
+function tidyNumber(v: string) {
+  if (!/\.\d{7,}/.test(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? String(Number(n.toPrecision(12))) : v;
+}
+
 /**
  * Virtualised table: only visible rows are rendered, and rows are fetched from
  * DuckDB in blocks of 200 as they scroll into view, so 1M rows scroll smoothly.
  */
-export function DataTable({ dataset }: { dataset: Dataset }) {
+export function DataTable({ dataset, highlight = [] }: { dataset: Dataset; highlight?: string[] }) {
   const setColumnKind = useStudio((s) => s.setColumnKind);
   const scrollRef = useRef<HTMLDivElement>(null);
   const blocks = useRef(new Map<number, Cell[][]>());
@@ -27,6 +34,13 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
 
   const cols = dataset.columns;
   const width = INDEX_W + cols.length * COL_W;
+  const marked = new Set(highlight);
+
+  // Bring the first new column into view, since added columns land at the far right.
+  const firstMarked = cols.findIndex((c) => marked.has(c.name));
+  useEffect(() => {
+    if (firstMarked >= 0) scrollRef.current?.scrollTo({ left: Math.max(0, firstMarked * COL_W - COL_W / 2) });
+  }, [firstMarked]);
 
   const rows = useVirtualizer({
     count: dataset.rowCount,
@@ -71,7 +85,11 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
             #
           </div>
           {cols.map((c) => (
-            <div key={c.name} className="flex flex-col justify-center gap-1 border-r px-2" style={{ width: COL_W }}>
+            <div
+              key={c.name}
+              className={`flex flex-col justify-center gap-1 border-r px-2 ${marked.has(c.name) ? "bg-accent-soft" : ""}`}
+              style={{ width: COL_W }}
+            >
               <span className="truncate font-medium text-text" title={`${c.name} (${c.duckType})`}>
                 {c.name}
               </span>
@@ -115,7 +133,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
                   return (
                     <div
                       key={c.name}
-                      className={`flex items-center truncate border-r px-2 ${c.kind === "number" ? "justify-end font-mono tabular-nums" : ""}`}
+                      className={`flex items-center truncate border-r px-2 ${c.kind === "number" ? "justify-end font-mono tabular-nums" : ""} ${marked.has(c.name) ? "bg-accent-soft/40" : ""}`}
                       style={{ width: COL_W }}
                       title={value ?? undefined}
                     >
@@ -124,7 +142,7 @@ export function DataTable({ dataset }: { dataset: Dataset }) {
                       ) : value === null ? (
                         <span className="text-xs italic text-muted/60">null</span>
                       ) : (
-                        <span className="truncate">{value}</span>
+                        <span className="truncate">{c.kind === "number" ? tidyNumber(value ?? "") : value}</span>
                       )}
                     </div>
                   );

@@ -4,7 +4,14 @@ import { useMemo } from "react";
 import { EChart, useThemeColors } from "@/components/charts/EChart";
 import type { Profile } from "@/lib/profile/profile";
 
-export function CorrelationHeatmap({ data }: { data: NonNullable<Profile["correlation"]> }) {
+export function CorrelationHeatmap({
+  data,
+  sequential = false,
+}: {
+  data: NonNullable<Profile["correlation"]>;
+  /** 0..1 measures (e.g. Cramér's V) use a one-hue ramp instead of the diverging scale */
+  sequential?: boolean;
+}) {
   const theme = useThemeColors();
   const option = useMemo(() => {
     const cells: [number, number, number | string][] = [];
@@ -14,7 +21,7 @@ export function CorrelationHeatmap({ data }: { data: NonNullable<Profile["correl
     return {
       tooltip: {
         formatter: (p: { value: [number, number, number | string] }) =>
-          `${data.columns[p.value[1]]} × ${data.columns[p.value[0]]}<br/><b>r = ${p.value[2]}</b>`,
+          `${data.columns[p.value[1]]} × ${data.columns[p.value[0]]}<br/><b>${sequential ? "V" : "r"} = ${p.value[2]}</b>`,
       },
       grid: { left: 8, right: 70, top: 8, bottom: 8, containLabel: true },
       xAxis: {
@@ -32,15 +39,15 @@ export function CorrelationHeatmap({ data }: { data: NonNullable<Profile["correl
         axisLine: { lineStyle: { color: theme.border } },
       },
       visualMap: {
-        min: -1,
+        min: sequential ? 0 : -1,
         max: 1,
         calculable: true,
         orient: "vertical",
         right: 0,
         top: "middle",
         textStyle: { color: theme.muted },
-        // Diverging scale: blue (negative) → neutral → orange (positive)
-        inRange: { color: ["#2563eb", "#93c5fd", theme.surface, "#fdba74", "#ea580c"] },
+        // Diverging scale: blue (negative) → neutral grey → red (positive)
+        inRange: { color: sequential ? ["#cde2fb", "#3987e5", "#0d366b"] : [theme.divNeg, theme.divMid, theme.divPos] },
       },
       series: [
         {
@@ -52,7 +59,7 @@ export function CorrelationHeatmap({ data }: { data: NonNullable<Profile["correl
         },
       ],
     };
-  }, [data, theme]);
+  }, [data, theme, sequential]);
 
   const height = Math.max(280, data.columns.length * 34 + 90);
   return <EChart option={option} className="w-full" style={{ height }} />;
